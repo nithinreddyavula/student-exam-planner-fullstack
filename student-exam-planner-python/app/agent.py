@@ -1,9 +1,10 @@
+import os
 from dotenv import load_dotenv
 load_dotenv()
 from typing import TypedDict, List
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_groq import ChatGroq
+from openai import OpenAI
 from langgraph.graph import StateGraph, END
 
 class PlannerState(TypedDict):
@@ -19,8 +20,11 @@ db = Chroma(
     persist_directory="./chroma_db"
 )
 
-SIMILARITY_THRESHOLD = 1.2
-llm = ChatGroq(model_name="llama-3.3-70b-versatile")
+SIMILARITY_THRESHOLD = 1.5
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY")
+)
 
 def retrieve(state: PlannerState) -> dict:
     results = db.similarity_search_with_score(state["question"], k=3)
@@ -44,8 +48,11 @@ def grade_relevance(state: PlannerState) -> dict:
 def generate(state: PlannerState) -> dict:
     context = "\n\n".join([text for text, score in state["documents"]])
     prompt = f"Use the following context to answer the question.\n\nContext:\n{context}\n\nQuestion: {state['question']}"
-    response = llm.invoke(prompt)
-    return {"answer": response.content}
+    response = client.chat.completions.create(
+        model="liquid/lfm-2.5-1.2b-instruct:free",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return {"answer": response.choices[0].message.content}
 
 def route(state: PlannerState) -> str:
     if state["relevant"]:
